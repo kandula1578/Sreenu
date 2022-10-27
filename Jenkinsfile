@@ -1,8 +1,8 @@
 pipeline {
     agent any 
-//     parameters {
-//     choice(name: 'Branch', choices: ['master', 'dev', 'uat'], description: 'Pick something')
-//     }
+    parameters {
+    choice(name: 'Branch', choices: ['master', 'dev', 'uat'], description: 'Pick something')
+    }
     environment {
     DOCKERHUB_CREDENTIALS = credentials('kandula-dockerhub')
 //     BRANCH = "${env.Branch}"
