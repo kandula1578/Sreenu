@@ -17,7 +17,7 @@ pipeline {
 
         stage('Build docker image') {
             steps {
-                sh 'docker build -t kandula17/nodeapp:${GIT_BRANCH#*/}_1.0 . '
+                sh 'docker build -t kandula17/nodeapp:${GIT_BRANCH}_1.0 . '
             }
         }
         stage('login to dockerhub') {
