@@ -1,0 +1,112 @@
+include:
+  - project: ''
+    ref: master
+    file: 'job-env-set-and-verify-t4c-aws-lp-mw.yml'
+
+
+stages:
+  - deploy-env-setup
+  - build
+  - deploy
+  - cleanup
+
+variables:
+  DOCKER_IMAGE_TAG_SERVICE: ${CI_REGISTRY_IMAGE}:${CI_COMMIT_REF_SLUG}
+  
+build:
+  image: docker:latest
+  services:
+    - docker:dind
+  stage: build
+  before_script:
+    - docker login -u gitlab-ci-token -p $CI_JOB_TOKEN $CI_REGISTRY
+  script:
+    - |
+      FILE=ci-env-specific-vars.env
+      if [ -f "$FILE" ]; then
+        echo "Setting environment using: " $FILE
+        export $(grep -v '^#' ci-env-specific-vars.env | xargs -d '\n') 
+      else 
+        echo "[ERROR]CI environment file does not exist: " $FILE
+        exit 143
+      fi    
+    - set -e
+    - apk update && apk add gettext
+    - envsubst < ./ci/application-deploy.env > .env
+    - apk add --update nodejs npm
+    - docker build -t $DOCKER_IMAGE_TAG_SERVICE .
+    - docker push $DOCKER_IMAGE_TAG_SERVICE
+ 
+.deploy_template: &deploy_configuration 
+  stage: deploy
+  script:
+    #- apk add --update --no-cache py-pip jq
+    #- pip install awscli
+    - aws ecs update-service --cluster main --service sreenu --force-new-deployment --region eu-central-1
+    - aws ecs describe-services --cluster main --services sreenu --region eu-central-1
+    - |
+      for i in 1 2 3 4 5 6 7 8 9 10
+      do
+        SERVICES=$(aws ecs describe-services --cluster main --services sreenu --region eu-central-1)
+        SERVICE_STATE=$(echo $SERVICES | jq -r '.services[0].deployments[0].rolloutState')
+        #echo $SERVICE_STATE
+        if [ $SERVICE_STATE = "COMPLETED" ]
+        then
+         echo "The deployment is successful!"
+         break
+        elif [ $SERVICE_STATE = "FAILED" ]
+        then
+          echo "The deployment failed!"
+          exit 1
+          break
+        elif [ $SERVICE_STATE = "IN_PROGRESS" ]
+        then 
+         echo "The deployment is IN_PROGRESS, fetching the rollout state again after a min"
+         sleep 1m
+        fi
+      done
+    - |
+      if [ $SERVICE_STATE = "IN_PROGRESS" ]
+      then
+        echo "The deployment is still in IN_PROGRESS state even after 10 mins"
+        echo "Please verify the deployment configurations"
+        exit 1
+      fi
+
+deploy-dev:
+  <<: *deploy_configuration
+  only:
+    refs:
+      - development
+  tags: 
+    - gitlab
+    - shell
+    - dev
+
+deploy-preprod:
+  <<: *deploy_configuration
+  only:
+    refs:
+      - uat
+  tags: 
+    - gitlab
+    - shell
+    - prod   
+
+deploy-prod:
+  <<: *deploy_configuration
+  only:
+    refs:
+      - release
+  tags: 
+    - gitlab
+    - shell
+    - prod
+
+cleanup_job:
+  stage: cleanup
+  script:
+    - echo "Cleaning up"
+    - rm -rf "%CACHE_PATH%/%CI_PIPELINE_ID%"
+  when: always
+
